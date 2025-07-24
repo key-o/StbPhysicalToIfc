@@ -1,0 +1,20 @@
+{
+  "_comment": "STB2IFC 要素中心アプローチ設定ファイル",
+  "_version": "1.0",
+  "enabled": {
+    "_comment": "要素中心アプローチを有効にするかどうか",
+    "value": true
+  },
+  "default_mode": {
+    "_comment": "デフォルト変換モード: legacy, element_centric, hybrid, auto",
+    "value": "hybrid"
+  },
+  "enable_fallback": {
+    "_comment": "エラー時のフォールバック機能を有効にするかどうか",
+    "value": true
+  },
+  "confidence_threshold": {
+    "_comment": "階層判定の信頼度閾値 (0.0-1.0)",
+    "value": 0.7
+  }
+}

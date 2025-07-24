@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "default_mode": "hybrid",
+  "enable_performance_monitoring": true,
+  "performance_comparison_enabled": false,
+  "processing_timeout_ms": 30000.0,
+  "duplicate_tolerance": 0,
+  "confidence_threshold": 0.7,
+  "validation_enabled": true,
+  "enable_fallback": true,
+  "fallback_threshold_ms": 5000.0,
+  "max_fallback_attempts": 1,
+  "enable_detailed_logging": false,
+  "log_performance_metrics": true,
+  "log_conversion_statistics": true,
+  "enable_experimental_features": false,
+  "parallel_processing_enabled": false,
+  "memory_optimization_enabled": true
+}
