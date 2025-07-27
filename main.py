@@ -105,7 +105,7 @@ def main():
         # EXE環境では追加で完了メッセージを表示
         if is_exe_environment():
             show_message_box(
-                "処理完了", "Stb2IFC変換ツール\n\n" + final_message, "info"
+                "処理完了", "StbPhysicalToIfc変換ツール\n\n" + final_message, "info"
             )
     else:
         error_message = "処理中にエラーが発生しました"
@@ -117,7 +117,7 @@ def main():
         if is_exe_environment():
             show_message_box(
                 "処理エラー",
-                "Stb2IFC変換ツール\n\n"
+                "StbPhysicalToIfc変換ツール\n\n"
                 + error_message
                 + "\n\n詳細はerror.logファイルを確認してください。",
                 "error",

@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-echo Stb2IFC EXE ビルド（デバッグ版 - コンソール表示あり）を開始します...
+echo StbPhysicalToIfc EXE ビルド（デバッグ版 - コンソール表示あり）を開始します...
 
 echo.
 echo 1. 依存関係をインストール中...
@@ -10,14 +10,14 @@ echo.
 echo 2. 既存のビルドファイルをクリア中...
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
-if exist Stb2IFC_debug.spec del Stb2IFC_debug.spec
+if exist StbPhysicalToIfc_debug.spec del StbPhysicalToIfc_debug.spec
 
 echo.
 echo 3. デバッグ用EXEファイルをビルド中...
 pyinstaller ^
   --onefile ^
   --console ^
-  --name "Stb2IFC_debug" ^
+  --name "StbPhysicalToIfc_debug" ^
   --icon icon.ico ^
   --add-data "materials;materials" ^
   --add-data "sampleStb;sampleStb" ^
@@ -145,9 +145,9 @@ echo For complete license information, please visit the above website.
 
 echo.
 echo 5. ビルド完了確認...
-if exist dist\Stb2IFC_debug.exe (
+if exist dist\StbPhysicalToIfc_debug.exe (
     echo [OK] デバッグ版ビルドが正常に完了しました！
-    echo 実行ファイル: dist\Stb2IFC_debug.exe
+    echo 実行ファイル: dist\StbPhysicalToIfc_debug.exe
     echo [!] このファイルはデバッグ用です。コンソールウィンドウが表示され、詳細なログが出力されます。
 ) else (
     echo [ERROR] ビルドに失敗しました
@@ -156,11 +156,11 @@ if exist dist\Stb2IFC_debug.exe (
 
 echo.
 echo 6. ファイルサイズ確認...
-for %%A in (dist\Stb2IFC_debug.exe) do echo ファイルサイズ: %%~zA bytes
+for %%A in (dist\StbPhysicalToIfc_debug.exe) do echo ファイルサイズ: %%~zA bytes
 
 echo.
 echo [OK] デバッグ版ビルドが完了しました！
-echo 作成されたファイル: dist\Stb2IFC_debug.exe
+echo 作成されたファイル: dist\StbPhysicalToIfc_debug.exe
 echo [!] 問題の特定後、build_exe.bat で本番版をビルドしてください。
 echo.
 pause

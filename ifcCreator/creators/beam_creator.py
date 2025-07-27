@@ -389,58 +389,82 @@ class BeamCreator(LinearElementCreator):
             # テーパー形状作成 - 旧実装のUnifiedGeometryBuilderロジックを参考
             # IFC4でのテーパー形状はIfcSectionedSpineまたはIfcSweptAreaSolidTaperedを使用
             
-            # IfcSectionedSpineを使用したテーパー形状作成
+            # 旧版のUnifiedGeometryBuilderと同じロジックでIfcExtrudedAreaSolidTaperedを使用
             try:
-                # スパインカーブ（梁の中心線）を作成
-                start_pt = ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0])
-                end_pt = ifc_file.createIfcCartesianPoint([length, 0.0, 0.0])
-                spine_curve = ifc_file.createIfcPolyline([start_pt, end_pt])
-                
-                # 断面配置点
-                cross_section_positions = [
-                    ifc_file.createIfcAxis2Placement3D(
-                        Location=start_pt,
-                        Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
-                        RefDirection=ifc_file.createIfcDirection([0.0, 1.0, 0.0])
-                    ),
-                    ifc_file.createIfcAxis2Placement3D(
-                        Location=end_pt, 
-                        Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
-                        RefDirection=ifc_file.createIfcDirection([0.0, 1.0, 0.0])
-                    )
-                ]
-                
-                # 断面プロファイル
-                cross_sections = [start_profile, end_profile]
-                
-                # IfcSectionedSpineを作成
-                sectioned_spine = ifc_file.createIfcSectionedSpine(
-                    SpineCurve=spine_curve,
-                    CrossSections=cross_sections,
-                    CrossSectionPositions=cross_section_positions
-                )
-                
-                logger.info(f"Created tapered beam shape with IfcSectionedSpine, length {length}")
-                return sectioned_spine
-                
-            except Exception as spine_error:
-                logger.warning(f"IfcSectionedSpine creation failed: {spine_error}, falling back to simple extrusion")
-                
-                # フォールバック: 開始断面での単純押し出し
-                direction = ifc_file.createIfcDirection([1.0, 0.0, 0.0])
+                # 旧版の create_tapered_geometry メソッドを再現
                 shape_placement = ifc_file.createIfcAxis2Placement3D(
-                    Location=ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0])
+                    Location=ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0]),
+                    Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                    RefDirection=ifc_file.createIfcDirection([1.0, 0.0, 0.0])
                 )
                 
-                solid = ifc_file.createIfcExtrudedAreaSolid(
+                # IfcExtrudedAreaSolidTaperedで旧版と同じテーパー形状を作成
+                solid = ifc_file.createIfcExtrudedAreaSolidTapered(
                     SweptArea=start_profile,
+                    EndSweptArea=end_profile,
                     Position=shape_placement,
-                    ExtrudedDirection=direction,
+                    ExtrudedDirection=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
                     Depth=length,
                 )
                 
-                logger.info(f"Created fallback beam shape with start profile, length {length}")
+                logger.info(f"Created tapered beam shape with IfcExtrudedAreaSolidTapered, length {length}")
                 return solid
+                
+            except Exception as tapered_error:
+                logger.warning(f"IfcExtrudedAreaSolidTapered creation failed: {tapered_error}, falling back to IfcSectionedSpine")
+                
+                # フォールバック: IfcSectionedSpineを使用
+                try:
+                    # スパインカーブ（梁の中心線）を作成
+                    start_pt = ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0])
+                    end_pt = ifc_file.createIfcCartesianPoint([length, 0.0, 0.0])
+                    spine_curve = ifc_file.createIfcPolyline([start_pt, end_pt])
+                    
+                    # 断面配置点
+                    cross_section_positions = [
+                        ifc_file.createIfcAxis2Placement3D(
+                            Location=start_pt,
+                            Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                            RefDirection=ifc_file.createIfcDirection([0.0, 1.0, 0.0])
+                        ),
+                        ifc_file.createIfcAxis2Placement3D(
+                            Location=end_pt, 
+                            Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                            RefDirection=ifc_file.createIfcDirection([0.0, 1.0, 0.0])
+                        )
+                    ]
+                    
+                    # 断面プロファイル
+                    cross_sections = [start_profile, end_profile]
+                    
+                    # IfcSectionedSpineを作成
+                    sectioned_spine = ifc_file.createIfcSectionedSpine(
+                        SpineCurve=spine_curve,
+                        CrossSections=cross_sections,
+                        CrossSectionPositions=cross_section_positions
+                    )
+                    
+                    logger.info(f"Created tapered beam shape with IfcSectionedSpine fallback, length {length}")
+                    return sectioned_spine
+                    
+                except Exception as spine_error:
+                    logger.warning(f"IfcSectionedSpine creation also failed: {spine_error}, using simple extrusion")
+                    
+                    # 最終フォールバック: 開始断面での単純押し出し
+                    direction = ifc_file.createIfcDirection([1.0, 0.0, 0.0])
+                    shape_placement = ifc_file.createIfcAxis2Placement3D(
+                        Location=ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0])
+                    )
+                    
+                    solid = ifc_file.createIfcExtrudedAreaSolid(
+                        SweptArea=start_profile,
+                        Position=shape_placement,
+                        ExtrudedDirection=direction,
+                        Depth=length,
+                    )
+                    
+                    logger.info(f"Created fallback beam shape with start profile, length {length}")
+                    return solid
 
         except Exception as e:
             logger.error(f"テーパー梁形状作成エラー: {e}")

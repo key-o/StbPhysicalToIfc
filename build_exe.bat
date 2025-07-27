@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-echo Stb2Ifc EXE ビルドを開始します...
+echo StbPhysicalToIfc EXE ビルドを開始します...
 
 echo.
 echo 1. 依存関係をインストール中...
@@ -10,14 +10,14 @@ echo.
 echo 2. 既存のビルドファイルをクリア中...
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
-if exist Stb2Ifc.spec del Stb2Ifc.spec
+if exist StbPhysicalToIfc.spec del StbPhysicalToIfc.spec
 
 echo.
 echo 3. EXEファイルをビルド中...
 pyinstaller ^
   --onefile ^
   --windowed ^
-  --name "Stb2Ifc" ^
+  --name "StbPhysicalToIfc" ^
   --icon icon.ico ^
   --add-data "materials;materials" ^
   --add-data "sampleStb;sampleStb" ^
@@ -129,9 +129,9 @@ pyinstaller ^
 
 echo.
 echo 4. ビルド完了確認...
-if exist dist\Stb2Ifc.exe (
+if exist dist\StbPhysicalToIfc.exe (
     echo [OK] ビルドが正常に完了しました！
-    echo 実行ファイル: dist\Stb2Ifc.exe
+    echo 実行ファイル: dist\StbPhysicalToIfc.exe
 ) else (
     echo [ERROR] ビルドに失敗しました
     echo 詳細なエラーログについては、上記のログを確認してください。
@@ -145,7 +145,7 @@ if exist dist\Stb2Ifc.exe (
 
 echo.
 echo 5. ファイルサイズ確認...
-for %%A in (dist\Stb2Ifc.exe) do echo ファイルサイズ: %%~zA bytes
+for %%A in (dist\StbPhysicalToIfc.exe) do echo ファイルサイズ: %%~zA bytes
 
 echo.
 echo 6. 動作テスト（オプション）...
@@ -154,12 +154,12 @@ set /p TEST_CHOICE=
 if /i "%TEST_CHOICE%"=="Y" (
     echo テスト実行中...
     cd dist
-    Stb2Ifc.exe --help
+    StbPhysicalToIfc.exe --help
     cd ..
 )
 
 echo.
 echo [OK] すべての処理が完了しました！
-echo 作成されたファイル: dist\Stb2Ifc.exe
+echo 作成されたファイル: dist\StbPhysicalToIfc.exe
 echo.
 pause

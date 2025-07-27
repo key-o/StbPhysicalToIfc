@@ -42,7 +42,9 @@ class ColumnCreator(LinearElementCreator):
             from common.definition_processor import DefinitionProcessor
             try:
                 processed_def = DefinitionProcessor.process_vertical_element_definition(
-                    definition, 0, "柱", StructuralSection
+                    definition, 0, "柱", StructuralSection,
+                    bottom_section_key="sec_bottom",
+                    top_section_key="sec_top"
                 )
                 bottom_point = processed_def.get("bottom_point")
                 top_point = processed_def.get("top_point")
@@ -76,7 +78,7 @@ class ColumnCreator(LinearElementCreator):
 
             # 回転情報を取得
             rotate_radians = definition.get("rotate_radians", 0.0)
-            is_ref_dir = definition.get("is_reference_direction", False)
+            is_reference_direction = definition.get("is_reference_direction", False)
             return self.create_column(
                 bottom_point,
                 top_point,
@@ -86,7 +88,7 @@ class ColumnCreator(LinearElementCreator):
                 column_tag,
                 stb_guid,
                 rotate_radians,
-                is_ref_dir,
+                is_reference_direction,
             )
 
         except Exception as e:
@@ -126,6 +128,14 @@ class ColumnCreator(LinearElementCreator):
             return None
 
         try:
+            # デバッグ: 受け取った値を確認
+            self.logger.debug(
+                "create_column: %s, is_reference_direction=%s, rotate_radians=%.3f",
+                column_name,
+                is_reference_direction,
+                rotate_radians,
+            )
+            
             # 上端断面の処理
             effective_top_section = sec_top or sec_bottom
             is_tapered = sec_top is not None and sec_bottom != effective_top_section
@@ -310,92 +320,101 @@ class ColumnCreator(LinearElementCreator):
     ):
         """テーパー断面柱の形状を作成"""
         try:
-            # 下端断面の形状を取得
+            if not self.project_builder or not self.project_builder.file:
+                logger.warning(
+                    "ProjectBuilder or IFC file not available for tapered column shape"
+                )
+                return None
+
+            ifc_file = self.project_builder.file
+
+            # 既存の柱プロファイル作成メソッドを使用
             bottom_profile = self._create_section_profile(bottom_section)
-            if not bottom_profile:
-                self.logger.error("下端断面の形状作成に失敗")
-                return None
-            
-            # 上端断面の形状を取得
             top_profile = self._create_section_profile(top_section)
-            if not top_profile:
-                self.logger.error("上端断面の形状作成に失敗")
+
+            if not bottom_profile or not top_profile:
+                logger.error("Failed to create profiles for tapered column")
                 return None
-            
-            # テーパー押し出し形状を作成
-            # 下端のプロファイルから上端のプロファイルへの線形変化
-            direction = self.ifc.createIfcDirection((0.0, 0.0, 1.0))
-            
-            # IFC4.0以降のテーパー押し出し形状を作成
-            # IfcSectionedSolidを使用してより精密なテーパー形状を作成
+
+            # 梁のテーパーロジックを柱用に適用 - 旧版のUnifiedGeometryBuilderと同じロジック
             try:
-                # 軸線を作成（柱の中心軸）
-                axis_points = [
-                    self.ifc.createIfcCartesianPoint((0.0, 0.0, 0.0)),
-                    self.ifc.createIfcCartesianPoint((0.0, 0.0, height))
-                ]
-                axis_curve = self.ifc.createIfcPolyline(axis_points)
-                
-                # 断面位置を定義（下端と上端）
-                cross_sections = [bottom_profile, top_profile]
-                cross_section_positions = [0.0, height]  # 軸線上の位置
-                
-                # IfcSectionedSolidHorizontal を作成（IFC4.0以降）
-                sectioned_solid = self.ifc.createIfcSectionedSolidHorizontal(
-                    Directrix=axis_curve,
-                    CrossSections=cross_sections
+                # 旧版の create_tapered_geometry メソッドを再現（柱用）
+                shape_placement = ifc_file.createIfcAxis2Placement3D(
+                    Location=ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0]),
+                    Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                    RefDirection=ifc_file.createIfcDirection([1.0, 0.0, 0.0])
                 )
                 
-                return sectioned_solid
+                # IfcExtrudedAreaSolidTaperedで旧版と同じテーパー形状を作成
+                solid = ifc_file.createIfcExtrudedAreaSolidTapered(
+                    SweptArea=bottom_profile,
+                    EndSweptArea=top_profile,
+                    Position=shape_placement,
+                    ExtrudedDirection=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                    Depth=height,
+                )
                 
-            except Exception as e:
-                # フォールバック: 複数セグメントによる近似
-                self.logger.warning(f"IfcSectionedSolidHorizontal作成に失敗、セグメント近似を使用: {e}")
+                logger.info(f"Created tapered column shape with IfcExtrudedAreaSolidTapered, height {height}")
+                return solid
                 
-                # 高さを10セグメントに分割（より滑らかな近似）
-                segments = 10
-                segment_height = height / segments
-                solids = []
+            except Exception as tapered_error:
+                logger.warning(f"IfcExtrudedAreaSolidTapered creation failed: {tapered_error}, falling back to IfcSectionedSpine")
                 
-                for i in range(segments):
-                    # 各セグメントの断面を線形補間で計算
-                    ratio = i / segments
-                    interpolated_profile = self._interpolate_section_profiles(
-                        bottom_section, top_section, ratio
+                # フォールバック: IfcSectionedSpineを使用
+                try:
+                    # スパインカーブ（柱の中心線）を作成
+                    start_pt = ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0])
+                    end_pt = ifc_file.createIfcCartesianPoint([0.0, 0.0, height])
+                    spine_curve = ifc_file.createIfcPolyline([start_pt, end_pt])
+                    
+                    # 断面配置点
+                    cross_section_positions = [
+                        ifc_file.createIfcAxis2Placement3D(
+                            Location=start_pt,
+                            Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                            RefDirection=ifc_file.createIfcDirection([1.0, 0.0, 0.0])
+                        ),
+                        ifc_file.createIfcAxis2Placement3D(
+                            Location=end_pt, 
+                            Axis=ifc_file.createIfcDirection([0.0, 0.0, 1.0]),
+                            RefDirection=ifc_file.createIfcDirection([1.0, 0.0, 0.0])
+                        )
+                    ]
+                    
+                    # 断面プロファイル
+                    cross_sections = [bottom_profile, top_profile]
+                    
+                    # IfcSectionedSpineを作成
+                    sectioned_spine = ifc_file.createIfcSectionedSpine(
+                        SpineCurve=spine_curve,
+                        CrossSections=cross_sections,
+                        CrossSectionPositions=cross_section_positions
                     )
                     
-                    if interpolated_profile:
-                        # セグメントの押し出し
-                        segment_solid = self.ifc.createIfcExtrudedAreaSolid(
-                            SweptArea=interpolated_profile,
-                            Position=self.ifc.createIfcAxis2Placement3D(
-                                self.ifc.createIfcCartesianPoint((0.0, 0.0, i * segment_height)),
-                                self.ifc.createIfcDirection((0.0, 0.0, 1.0)),
-                                self.ifc.createIfcDirection((1.0, 0.0, 0.0))
-                            ),
-                            ExtrudedDirection=direction,
-                            Depth=segment_height
-                        )
-                        solids.append(segment_solid)
-                
-                # 全セグメントをBoolean UNIONで結合
-                if len(solids) > 1:
-                    result_solid = solids[0]
-                    for solid in solids[1:]:
-                        boolean_result = self.ifc.createIfcBooleanResult(
-                            Operator="UNION",
-                            FirstOperand=result_solid,
-                            SecondOperand=solid
-                        )
-                        result_solid = boolean_result
-                    return result_solid
-                elif len(solids) == 1:
-                    return solids[0]
-                
-            return None
-            
+                    logger.info(f"Created tapered column shape with IfcSectionedSpine fallback, height {height}")
+                    return sectioned_spine
+                    
+                except Exception as spine_error:
+                    logger.warning(f"IfcSectionedSpine creation also failed: {spine_error}, using simple extrusion")
+                    
+                    # 最終フォールバック: 下端断面での単純押し出し
+                    direction = ifc_file.createIfcDirection([0.0, 0.0, 1.0])
+                    shape_placement = ifc_file.createIfcAxis2Placement3D(
+                        Location=ifc_file.createIfcCartesianPoint([0.0, 0.0, 0.0])
+                    )
+                    
+                    solid = ifc_file.createIfcExtrudedAreaSolid(
+                        SweptArea=bottom_profile,
+                        Position=shape_placement,
+                        ExtrudedDirection=direction,
+                        Depth=height,
+                    )
+                    
+                    logger.info(f"Created fallback column shape with bottom profile, height {height}")
+                    return solid
+
         except Exception as e:
-            self.logger.error(f"テーパー断面柱形状作成エラー: {e}")
+            logger.error(f"テーパー柱形状作成エラー: {e}")
             return None
 
     def _interpolate_section_profiles(
@@ -433,32 +452,36 @@ class ColumnCreator(LinearElementCreator):
         try:
             dimensions = {}
             
+            # section_typeを使用して断面タイプを判定
+            section_type = getattr(section, 'section_type', 'UNKNOWN')
+            
             # H形鋼の場合
-            if section.shape_name in ["H", "HW", "HM", "HN"]:
+            if section_type in ["H", "I"]:
                 dimensions.update({
-                    "height": getattr(section, 'height', 0.0),
-                    "width": getattr(section, 'width', 0.0),
+                    "height": getattr(section, 'overall_depth', getattr(section, 'height', 0.0)),
+                    "width": getattr(section, 'overall_width', getattr(section, 'width', 0.0)),
                     "web_thickness": getattr(section, 'web_thickness', 0.0),
                     "flange_thickness": getattr(section, 'flange_thickness', 0.0)
                 })
             
             # 角形鋼管の場合
-            elif section.shape_name in ["BOX", "BCR"]:
+            elif section_type in ["BOX", "BCR"]:
                 dimensions.update({
-                    "height": getattr(section, 'height', 0.0),
-                    "width": getattr(section, 'width', 0.0),
-                    "thickness": getattr(section, 'thickness', 0.0)
+                    "height": getattr(section, 'outer_height', getattr(section, 'height', 0.0)),
+                    "width": getattr(section, 'outer_width', getattr(section, 'width', 0.0)),
+                    "thickness": getattr(section, 'wall_thickness', 0.0)
                 })
             
             # 円形鋼管の場合
-            elif section.shape_name in ["PIPE", "P"]:
+            elif section_type in ["PIPE", "P"]:
+                diameter = getattr(section, 'outer_diameter', getattr(section, 'diameter', 0.0))
                 dimensions.update({
-                    "diameter": getattr(section, 'diameter', 0.0),
-                    "thickness": getattr(section, 'thickness', 0.0)
+                    "diameter": diameter,
+                    "thickness": getattr(section, 'wall_thickness', 0.0)
                 })
             
             # L形鋼の場合
-            elif section.shape_name in ["L"]:
+            elif section_type in ["L"]:
                 dimensions.update({
                     "height": getattr(section, 'height', 0.0),
                     "width": getattr(section, 'width', 0.0),
@@ -472,108 +495,22 @@ class ColumnCreator(LinearElementCreator):
             return {}
 
     def _create_interpolated_profile(self, base_section: StructuralSection, dimensions: dict):
-        """補間された寸法で断面プロファイルを作成"""
+        """補間された寸法で断面プロファイルを作成（ProfileServiceを使用）"""
         try:
-            shape_name = base_section.shape_name
+            # ProfileServiceを使用して統一的にプロファイルを作成
+            from ..services.profile_service import ProfileService
+            profile_service = ProfileService(self.project_builder.file)
             
-            # H形鋼の場合
-            if shape_name in ["H", "HW", "HM", "HN"]:
-                return self._create_h_profile(
-                    dimensions.get("height", 0.0),
-                    dimensions.get("width", 0.0),
-                    dimensions.get("web_thickness", 0.0),
-                    dimensions.get("flange_thickness", 0.0)
-                )
+            # 寸法情報を基にして一時的な断面オブジェクトを作成
+            temp_section = type(base_section)(
+                section_type=getattr(base_section, 'section_type', 'UNKNOWN'),
+                **dimensions
+            )
             
-            # 角形鋼管の場合
-            elif shape_name in ["BOX", "BCR"]:
-                return self._create_box_profile(
-                    dimensions.get("height", 0.0),
-                    dimensions.get("width", 0.0),
-                    dimensions.get("thickness", 0.0)
-                )
-            
-            # 円形鋼管の場合
-            elif shape_name in ["PIPE", "P"]:
-                return self._create_pipe_profile(
-                    dimensions.get("diameter", 0.0),
-                    dimensions.get("thickness", 0.0)
-                )
-            
-            # L形鋼の場合
-            elif shape_name in ["L"]:
-                return self._create_l_profile(
-                    dimensions.get("height", 0.0),
-                    dimensions.get("width", 0.0),
-                    dimensions.get("thickness", 0.0)
-                )
-            
-            return None
+            return profile_service.create_profile(temp_section, "column")
             
         except Exception as e:
             self.logger.error(f"補間プロファイル作成エラー: {e}")
-            return None
-
-    def _create_h_profile(self, height: float, width: float, web_thickness: float, flange_thickness: float):
-        """H形断面プロファイルを作成"""
-        try:
-            return self.ifc.createIfcIShapeProfileDef(
-                ProfileType="AREA",
-                ProfileName=f"H_{height}x{width}",
-                OverallWidth=width,
-                OverallDepth=height,
-                WebThickness=web_thickness,
-                FlangeThickness=flange_thickness,
-                FilletRadius=None
-            )
-        except Exception as e:
-            self.logger.error(f"H形プロファイル作成エラー: {e}")
-            return None
-
-    def _create_box_profile(self, height: float, width: float, thickness: float):
-        """角形鋼管断面プロファイルを作成"""
-        try:
-            return self.ifc.createIfcRectangleHollowProfileDef(
-                ProfileType="AREA",
-                ProfileName=f"BOX_{height}x{width}x{thickness}",
-                XDim=width,
-                YDim=height,
-                WallThickness=thickness,
-                InnerFilletRadius=None,
-                OuterFilletRadius=None
-            )
-        except Exception as e:
-            self.logger.error(f"角形鋼管プロファイル作成エラー: {e}")
-            return None
-
-    def _create_pipe_profile(self, diameter: float, thickness: float):
-        """円形鋼管断面プロファイルを作成"""
-        try:
-            return self.ifc.createIfcCircleHollowProfileDef(
-                ProfileType="AREA",
-                ProfileName=f"PIPE_{diameter}x{thickness}",
-                Radius=diameter / 2.0,
-                WallThickness=thickness
-            )
-        except Exception as e:
-            self.logger.error(f"円形鋼管プロファイル作成エラー: {e}")
-            return None
-
-    def _create_l_profile(self, height: float, width: float, thickness: float):
-        """L形断面プロファイルを作成"""
-        try:
-            return self.ifc.createIfcLShapeProfileDef(
-                ProfileType="AREA",
-                ProfileName=f"L_{height}x{width}x{thickness}",
-                Depth=height,
-                Width=width,
-                Thickness=thickness,
-                FilletRadius=None,
-                EdgeRadius=None,
-                LegSlope=None
-            )
-        except Exception as e:
-            self.logger.error(f"L形プロファイル作成エラー: {e}")
             return None
 
     def _create_placement(
@@ -597,9 +534,26 @@ class ColumnCreator(LinearElementCreator):
             # Z軸は垂直方向
             axis = ifc_file.createIfcDirection([0.0, 0.0, 1.0])
 
+            # isReferenceDirectionによる回転処理（旧版と同様）
+            # isReferenceDirection=false (H型配置): 90度回転を追加
+            # isReferenceDirection=true (I型配置): 元の回転角度を維持
+            effective_rotation = rotate_radians
+            if not is_reference_direction:
+                effective_rotation += math.pi / 2  # 90度（π/2ラジアン）追加でH型配置
+                self.logger.debug(
+                    "isReferenceDirection=false (H型配置): 回転角度を90度追加 (%.1f° -> %.1f°)",
+                    math.degrees(rotate_radians),
+                    math.degrees(effective_rotation),
+                )
+            else:
+                self.logger.debug(
+                    "isReferenceDirection=true (I型配置): 元の回転角度を維持 (%.1f°)",
+                    math.degrees(rotate_radians),
+                )
+
             # 回転角度に基づく参照方向（XY平面上のX軸回転）
-            cos_val = math.cos(rotate_radians)
-            sin_val = math.sin(rotate_radians)
+            cos_val = math.cos(effective_rotation)
+            sin_val = math.sin(effective_rotation)
             ref_dir = ifc_file.createIfcDirection([cos_val, sin_val, 0.0])
 
             # 座標系を作成
@@ -678,211 +632,15 @@ class ColumnCreator(LinearElementCreator):
             return None
 
     def _create_section_profile(self, section: StructuralSection):
-        """断面プロファイルを作成"""
+        """断面プロファイルを作成（ProfileServiceを使用）"""
         try:
             if not self.project_builder or not self.project_builder.file:
                 return None
 
-            ifc_file = self.project_builder.file
-
-            # sectionが辞書の場合とStructuralSectionオブジェクトの場合を両方サポートするヘルパー関数
-            def get_section_property(key: str, default=None):
-                if hasattr(section, 'properties'):
-                    return section.properties.get(key, default)
-                else:
-                    return section.get(key, default)
-
-            # 断面タイプを取得
-            if hasattr(section, 'section_type'):
-                section_type = section.section_type.upper()
-            else:
-                section_type = section.get("section_type", "RECTANGLE").upper()
-
-            if section_type == "RECTANGLE":
-                # 矩形断面 - STB抽出キー(width_x, width_y)に対応
-                width = get_section_property("width_x", get_section_property("width", 300.0))
-                height = get_section_property("width_y", get_section_property("height", 600.0))
-
-                return ifc_file.createIfcRectangleProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=f"RECT_{width}x{height}",
-                    XDim=width,
-                    YDim=height,
-                )
-
-            elif section_type in ["H", "I", "IBEAM"]:
-                # H形断面 - STB抽出キーに対応
-                overall_width = get_section_property("overall_width", get_section_property("width", 200.0))
-                overall_depth = get_section_property("overall_depth", get_section_property("height", 400.0))
-                web_thickness = get_section_property("web_thickness", 8.0)
-                flange_thickness = get_section_property("flange_thickness", 12.0)
-                
-                # プロファイル名の生成
-                if hasattr(section, 'get_standardized_profile_name'):
-                    profile_name = section.get_standardized_profile_name('legacy')
-                else:
-                    profile_name = f"H_{overall_width}x{overall_depth}x{web_thickness}x{flange_thickness}"
-
-                return ifc_file.createIfcIShapeProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=profile_name,
-                    OverallWidth=overall_width,
-                    OverallDepth=overall_depth,
-                    WebThickness=web_thickness,
-                    FlangeThickness=flange_thickness,
-                )
-
-            elif section_type == "CIRCLE":
-                # 円形断面
-                radius = get_section_property("radius", 150.0)
-
-                return ifc_file.createIfcCircleProfileDef(
-                    ProfileType="AREA", ProfileName=f"CIRCLE_{radius*2}", Radius=radius
-                )
-
-            elif section_type == "BOX":
-                # 角形鋼管断面
-                width = get_section_property("width", 200.0)
-                height = get_section_property("height", 200.0)
-                wall_thickness = get_section_property("wall_thickness", 8.0)
-
-                return ifc_file.createIfcRectangleHollowProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=f"BOX_{width}x{height}x{wall_thickness}",
-                    XDim=width,
-                    YDim=height,
-                    WallThickness=wall_thickness,
-                )
-
-            elif section_type == "PIPE":
-                # 円形鋼管断面
-                radius = get_section_property("radius", 100.0)
-                wall_thickness = get_section_property("wall_thickness", 6.0)
-
-                return ifc_file.createIfcCircleHollowProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=f"PIPE_{radius*2}x{wall_thickness}",
-                    Radius=radius,
-                    WallThickness=wall_thickness,
-                )
-
-            elif section_type == "C":
-                # C形鋼（チャンネル）断面
-                overall_depth = get_section_property("overall_depth", 250.0)
-                flange_width = get_section_property("flange_width", 75.0)
-                web_thickness = get_section_property("web_thickness", 4.5)
-                flange_thickness = get_section_property("flange_thickness", 4.5)
-                
-                section_name = getattr(section, 'name', '') or get_section_property('stb_name', '')
-                prof_name = (
-                    section_name
-                    or f"C_{overall_depth}x{flange_width}x{web_thickness}x{flange_thickness}"
-                )
-
-                return ifc_file.createIfcCShapeProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=prof_name,
-                    Depth=overall_depth,
-                    Width=flange_width,
-                    WallThickness=web_thickness,
-                    Girth=flange_thickness,
-                )
-
-            elif section_type == "COMPOUND_CHANNEL":
-                # 複合チャンネル断面（2CB, 2CF等）
-                overall_depth = get_section_property("overall_depth", 250.0)
-                flange_width = get_section_property("flange_width", 75.0)
-                web_thickness = get_section_property("web_thickness", 4.5)
-                flange_thickness = get_section_property("flange_thickness", 4.5)
-                arrangement = get_section_property("arrangement", "BACK_TO_BACK")
-                
-                section_name = getattr(section, 'name', '') or get_section_property('stb_name', '')
-                prof_name = (
-                    section_name
-                    or f"2C_{arrangement}_{overall_depth}x{flange_width}x{web_thickness}x{flange_thickness}"
-                )
-                
-                # 複合チャンネル断面は適切なIFCプロファイルタイプが無いため、
-                # 組み合わされた断面として扱う
-                # 単一C形鋼として近似し、全体幅を調整
-                overall_width = get_section_property("overall_width", flange_width * 2)
-
-                return ifc_file.createIfcCShapeProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=prof_name,
-                    Depth=overall_depth,
-                    Width=overall_width,
-                    WallThickness=web_thickness,
-                    Girth=flange_thickness,
-                )
-
-            elif section_type == "L":
-                # L型鋼（アングル）断面
-                width = get_section_property("width", 100.0)
-                height = get_section_property("height", 100.0)
-                thickness = get_section_property("thickness", 7.0)
-                
-                section_name = getattr(section, 'name', '') or get_section_property('stb_name', '')
-                prof_name = (
-                    section_name
-                    or f"L_{width}x{height}x{thickness}"
-                )
-
-                return ifc_file.createIfcLShapeProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=prof_name,
-                    Depth=height,
-                    Width=width,
-                    Thickness=thickness,
-                )
-
-            elif section_type == "T":
-                # T形鋼断面
-                overall_depth = get_section_property("overall_depth", 200.0)
-                flange_width = get_section_property("flange_width", 150.0)
-                web_thickness = get_section_property("web_thickness", 8.0)
-                flange_thickness = get_section_property("flange_thickness", 12.0)
-                
-                section_name = getattr(section, 'name', '') or get_section_property('stb_name', '')
-                prof_name = (
-                    section_name
-                    or f"T_{overall_depth}x{flange_width}x{web_thickness}x{flange_thickness}"
-                )
-
-                return ifc_file.createIfcTShapeProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=prof_name,
-                    Depth=overall_depth,
-                    FlangeWidth=flange_width,
-                    WebThickness=web_thickness,
-                    FlangeThickness=flange_thickness,
-                )
-
-            elif section_type == "CIRCLE":
-                # 円形断面
-                radius = get_section_property("radius", 150.0)
-                
-                return ifc_file.createIfcCircleProfileDef(
-                    ProfileType="AREA", 
-                    ProfileName=f"CIRCLE_{radius*2}", 
-                    Position=None,
-                    Radius=radius
-                )
-
-            else:
-                # デフォルトは矩形断面
-                self.logger.warning(
-                    f"未対応の断面タイプ '{section_type}', 矩形断面で代用"
-                )
-                width = get_section_property("width", 300.0)
-                height = get_section_property("height", 600.0)
-
-                return ifc_file.createIfcRectangleProfileDef(
-                    ProfileType="AREA",
-                    ProfileName=f"DEFAULT_RECT_{width}x{height}",
-                    XDim=width,
-                    YDim=height,
-                )
+            # ProfileServiceを使用してプロファイルを作成
+            from ..services.profile_service import ProfileService
+            profile_service = ProfileService(self.project_builder.file)
+            return profile_service.create_profile(section, "column")
 
         except Exception as e:
             self.logger.error(f"断面プロファイル作成エラー: {e}")

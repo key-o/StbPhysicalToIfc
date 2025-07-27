@@ -1,6 +1,6 @@
-# Stb2IFC - EXEファイル作成ガイド
+# StbPhysicalToIfc - EXEファイル作成ガイド
 
-このドキュメントでは、PyInstallerを使用してStb2IFCプロジェクトから実行可能ファイル（.exe）を作成する方法について説明します。
+このドキュメントでは、PyInstallerを使用してStbPhysicalToIfcプロジェクトから実行可能ファイル（.exe）を作成する方法について説明します。
 
 ## 前提条件
 
@@ -40,14 +40,14 @@ pyinstaller --onefile main.py
 ### 2.2 推奨設定でのEXEファイル作成
 
 ```cmd
-pyinstaller --onefile --windowed --name "Stb2IFC" --icon icon.ico main.py
+pyinstaller --onefile --windowed --name "StbPhysicalToIfc" --icon icon.ico main.py
 ```
 
 #### オプションの説明
 
 - `--onefile`: 単一の実行ファイルとして作成
 - `--windowed`: コンソールウィンドウを表示しない（GUIアプリケーション用）
-- `--name "Stb2IFC"`: 実行ファイル名を指定
+- `--name "StbPhysicalToIfc"`: 実行ファイル名を指定
 - `--icon icon.ico`: アイコンファイルを指定
 
 ### 2.3 詳細設定でのEXEファイル作成（推奨）
@@ -56,7 +56,7 @@ pyinstaller --onefile --windowed --name "Stb2IFC" --icon icon.ico main.py
 pyinstaller ^
   --onefile ^
   --windowed ^
-  --name "Stb2IFC" ^
+  --name "StbPhysicalToIfc" ^
   --icon icon.ico ^
   --add-data "materials;materials" ^
   --add-data "sampleStb;sampleStb" ^
@@ -175,14 +175,14 @@ pyinstaller ^
 ### 3.1 specファイルの生成
 
 ```cmd
-pyinstaller --onefile --name "Stb2IFC" main.py
+pyinstaller --onefile --name "StbPhysicalToIfc" main.py
 ```
 
-これにより `Stb2IFC.spec` ファイルが生成されます。
+これにより `StbPhysicalToIfc.spec` ファイルが生成されます。
 
 ### 3.2 specファイルのカスタマイズ
 
-生成された `Stb2IFC.spec` ファイルを編集して、より詳細な設定を行います：
+生成された `StbPhysicalToIfc.spec` ファイルを編集して、より詳細な設定を行います：
 
 ```python
 # -*- mode: python ; coding: utf-8 -*-
@@ -324,7 +324,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='Stb2IFC',
+    name='StbPhysicalToIfc',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -344,7 +344,7 @@ exe = EXE(
 ### 3.3 specファイルからのビルド
 
 ```cmd
-pyinstaller Stb2IFC.spec
+pyinstaller StbPhysicalToIfc.spec
 ```
 
 ## 4. ビルド後の確認
@@ -353,12 +353,12 @@ pyinstaller Stb2IFC.spec
 
 ビルドが完了すると、以下の場所にファイルが生成されます：
 
-- `dist/Stb2IFC.exe` - 実行可能ファイル
+- `dist/StbPhysicalToIfc.exe` - 実行可能ファイル
 - `build/` - 一時ビルドファイル
 
 ### 4.2 動作確認
 
-1. `dist/Stb2IFC.exe` をダブルクリックして起動
+1. `dist/StbPhysicalToIfc.exe` をダブルクリックして起動
 2. GUIが正常に表示されることを確認
 3. サンプルSTBファイルでの変換テストを実行
 
